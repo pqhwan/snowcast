@@ -1,0 +1,404 @@
+CS168 Programming Assignment 1: Snowcast
+
+Assignment Out: September 5th, 2013
+
+Milestone: September 12th, 2013, 6pm
+
+Assignment Due: September 19th, 2013, 4pm
+
+1 Introduction
+
+You will be implementing a simple Internet Radio Station. The purpose of this assignment is to
+
+become familiar with sockets and threads, and to get you used to thinking about network protocols.
+
+If you're unfamiliar with sockets or threads, you should read the pages about them linked from
+
+the course webpage. As always, e-mail us at cs168tas@cs.brown.edu or to come to one of our
+
+o
+ce hours if you have further questions.
+
+2 Protocol
+
+This assignment has two parts: the server, which streams songs, and a pair of clients for connecting
+
+to the server and receiving songs.
+
+There are two kinds of data being sent between the server and the client. One is the control
+
+data. The client uses this data to specify which station to listen to and the server uses it to give
+
+the client song information. The other kind is the song data, which the server reads from song les
+
+and streams to the client. You will be using TCP for the control data and UDP for the song data.
+
+2.1 Client to Server Commands
+
+The client sends the server commands. There are two commands the client can send the server,
+
+in the following format.
+
+Hello:
+
+uint8_t commandType = 0;
+
+uint16_t udpPort;
+
+SetStation:
+
+uint8_t commandType = 1;
+
+uint16_t stationNumber;
+
+A uint8_t1
+
+is an unsigned 8-bit integer. A uint16_t is an unsigned 16-bit integer. Your
+
+programs should use network byte order.
+
+2 So, to send a Hello command, your client must send
+
+exactly three bytes to the server.
+
+1You can use these types from C if you #include <inttypes.h>.
+
+2Use the functions htons, htonl, ntohs and ntohl to convert from network to host byte order and back.
+
+1CS168 Snowcast
+
+The Hello command is sent when the client connects to the server. It tells the server what
+
+UDP port the server should be streaming song data to.
+
+The SetStation command is sent to pick an inital station or to change stations. stationNumber
+
+identies the station.
+
+2.2 Server to Client Replies
+
+There are three possible replies the server may send to the client:
+
+Welcome:
+
+uint8_t replyType = 0;
+
+uint16_t numStations;
+
+Announce:
+
+uint8_t replyType = 1;
+
+uint8_t songnameSize;
+
+char songname[songnameSize];
+
+InvalidCommand:
+
+uint8_t replyType = 2;
+
+uint8_t replyStringSize;
+
+char replyString[replyStringSize];
+
+A Welcome reply is sent in response to a Hello command. Stations are numbered sequentially
+
+from 0, so a numStations of 30 means 0 through 29 are valid. A Hello command, followed by a
+
+Welcome reply, is called a handshake.
+
+An Announce reply is sent on two occasions: after a client sends a SetStation command, or
+
+when the station a client is listening to changes its song. songnameSize represents the length, in
+
+bytes, of the lename, while songname contains the lename itself. The string must be formatted
+
+in ASCII and must not be null-terminated. So, to announce a song called Beat It, your client
+
+must send the replyType byte, followed by a byte whose value is 7, followed by the 7 bytes whose
+
+values are the ASCII character values of Beat It.
+
+An InvalidCommand reply is sent in response to any invalid command. replyString should
+
+contain a brief error message explaining what went wrong. Give helpful strings stating the reason for
+
+failure. If a SetStation command was sent with 1729 as the stationNumber, a bad replyString
+
+is \Error, closing connection.", while a good one is \Station 1729 does not exist.". To simplify the
+
+protocol, whenever the server receives an invalid command, it must reply with an InvalidCommand
+
+and then close the connection to the client that sent it.
+
+Invalid commands happen in the following situations:
+
+ou are unfamiliar or rusty with C, read through the documentation linked on the course web page
+
+er full language support and help with debugging tools.
+
+If you decide you would like to implement this or future projects in a language other than C,
+
+please contact us beforehand to seek approval. This project intends to familiarize you with the
+
+Berkeley sockets API, so you must demonstrate that your language provides a su
+ciently similar
+
+API. Linking to a web page containing the relevant language documentation is su
+cient. You must
+
+not use high-level socket wrappers unless you write them yourself; we will tell you which libraries
+
+are and which are not acceptable. Thus far, we have approved requests for C++ and Scheme
+
+(but still contact us if you want to use one of these). Note that for the later projects, you will
+
+be responsible for nding or writing your own IP and TCP packet headers (these can be included
+
+er limited language support,
+
+and your partner for the project must approve of your choice of language.
+
+3.1 Clients
+
+You will write two separate clients.
+
+3.1.1 UDP Client
+
+The UDP client handles song data. The executable must be called snowcast_listener. Its
+
+command line must be:
+
+snowcast_listener udpport
+
+The UDP client must print all data received on the specied UDP port to stdout3
+
+.
+
+3.1.2 TCP Client
+
+The TCP client handles the control data. The executable must be called snowcast_control. Its
+
+command line must be:
+
+3There's no need for the UDP client to play the data it receives itself, since you can just pipe its output into
+
+another program which plays the music instead. More on this later.
+
+3CS168 Snowcast
+
+snowcast_control servername serverport udpport
+
+servername represents the IP address (e.g. 128.148.38.158) or hostname (e.g. localhost, cslab6c)
+
+which the control client should connect to, and serverport is the port to connect to. udpport is
+
+the port on which the local UDP client is watching for song data.
+
+The control client should connect to the server and communicate with it according to the
+
+protocol. After the handshake, it should show a prompt and wait for input from stdin. If the user
+
+types in 'q' followed by a newline, the client should quit. If the user types in a number followed by
+
+a newline, the control should send a SetStation command with the user-provided station number.
+
+If the client gets an invalid reply from the server (one whose replyType is not 0, 1, or 2), then
+
+it should close the connection and exit.
+
+The client must print whatever information the server sends it (e.g. the numStations in a
+
+Welcome). It must print replies in real time.
+
+3.2 Server
+
+The server executable must be called snowcast_server. Its command line must be:
+
+snowcast_server tcpport file1 [file2 [file3 [...]]]
+
+That is, a port number on which the server will listen, followed by a list of les. To make things
+
+easy, each station will contain just one song. Station 0 should play le1, Station 1 should play le2,
+
+etc... Each station should loop its song indenitely.
+
+When the server starts, it should begin listening for connections. When a client connects, it
+
+should interact with it as specied by the Protocol. Additionally, it should send an Announce
+
+whenever a song repeats.
+
+You want the server to stream music, not to send it as fast as possible. Assume that all mp3
+
+les are 128kbps, meaning that the server should send data at a rate of 128kpbs (16 kilobytes/s).
+
+The server must print out any commands it receives and any replies it sends to stdout. It should
+
+also have a simple command-line interface: `p' followed by a newline should cause the the server
+
+should print out a list of its stations along with the clients that are connected to each one, and `q'
+
+followed by a newline should cause the server to close all connections, free any resources it's using,
+
+and quit.
+
+Additionally:
+
+ handle invalid commands (see the Protocol section above).
+
+ to test your code at the beginning is to stream text les instead of mp3s. Once
+
+you're more condent of your code, you can test your program using the mp3 les in
+
+/course/cs168/pub/snowcast/mp3. You can pipe the output of your UDP client into mpg123 to
+
+listen to the mp3:
+
+./snowcast_listener port | mpg123 -
+
+If you bring headphones to the sunlab, you should hear something.
+
+4.1 Rate Monitor
+
+Unfortunately, there are many details to streaming mp3s well that would require understanding
+
+the mp3 le format in detail to do a really good job. Instead we ask only that you stream the mp3
+
+at a constant bitrate. We've created a rate monitoring program available in
+
+/course/cs168/pub/snowcast/rate_monitor. This takes data from stdin, outputs it to stdout,
+
+and prints statistics about the rate at which it is receiving data to stderr. We'll be testing to see
+
+that your rate is consistently 16 kilobytes/second. You can run it as follows:
+
+./snowcast_listener port | /course/cs168/pub/snowcast/rate_monitor > /dev/null
+
+You can also pipe the rate monitor's output into mpg123.
+
+4.2 Reference Implementations
+
+For your convenience, we have provided binaries of reference implementations of the client and the
+
+server that follow the protocol and meet all the requirements. They're in
+
+/course/cs168/pub/snowcast. Take advantage of these! You can test your adherence to the
+
+protocol based on how well your programs interact with them. This is why our protocol is specied
+
+so precisely. Your programs are expected to interoperate with ours.
+
+5CS168 Snowcast
+
+5 Handin
+
+Hand in your project by typing
+
+cs168_handin snowcast
+
+from inside the directory where your work is located. To reduce clutter, the handin script removes
+
+.o les and binary executable les, and runs make clean before handing in your assignment. You
+
+can handin more than once - the new handin will replace the older one. We should be able to
+
+rebuild your programs by running make.
+
+6 Grading
+
+6.1 Milestone - 30%
+
+To make sure you're on the right track, 30% of your grade will be a milestone.
+
+You have to schedule an appointment with a TA by Thursday the 12th at 6PM. 10% of the
+
+milestone is a small demo. You must demo a client to us that successfully connects to a server,
+
+sends a Hello command, then waits for and prints the Welcome reply.
+
+The other 20% is for the design of your server, which is the hardest part of the assignment. You
+
+will be graded based on how well you have thought your design through. Make sure you especially
+
+think through your threading model. Will you spawn a new thread for every command you receive?
+
+How many threads will you have per client? Will you have one thread to handle all the stations,
+
+or one or more threads for each one? How will they communicate with each other? What mutexes
+
+will you need?
+
+If you're having trouble with the design, please come to our hours, or e-mail us with your
+
+question. We also encourage appointments outside of our hours if you feel you need help in-person.
+
+6.2 Program - 65%
+
+Most of your grade will be based on how well your program conforms to the specication. This
+
+includes how well it interacts with the reference implementations, as well as with each other's
+
+projects. Furthermore:
+
+ou can't assume recv and send will read or write all the bytes you requested. You have to
+
+er is read or written.
+
+ou can also augment the server or client in a non-trivial way. Here are some ideas:
+
+ou can maybe send a NewStation packet to all currently connected clients to inform
+
+them.
+
+Feel free to ask what we think about your addition. Also note that we've awarded extra credit
+
+in the past just for particularly innovative or elegant solutions, so feel motivated to do your best
+
+in your design and implementation.
+
+A Useful Hints/Tips
+
+We recommend that you use #define or const ints (in C++) for protocol-type constants. Your
+
+code will be much more readable - you won't be checking to see whether replyType is 2, you'll be
+
+checking to see that it's REPLY_INVALID_COMMAND.
+
+For the TCP connection, use recv() and send() (or read() and write()). For the UDP
+
+connection, use sendto() and recvfrom(). Don't send more than 1400 bytes with one call to
+
+sendto()4
+
+You will want to permit the server to reuse its port, so that you can kill it and restart it
+
+ the
+
+course website). To handle multiple connections on the server, you should have a thread which
+
+calls accept() in a loop. When it accepts a connection, it should start one or more threads to
+
+4This is because the MTU of Ethernet is 1440 bytes, and we don't want our UDP packets to be fragmented. You'll
+
+learn more about this later.
+
+7CS168 Snowcast
+
+handle that connection, and then continue accept()ing. To control the rate that the server sends
+
+song data at, use the the nanosleep() and gettimeofday() functions.
+
+The TCP client has to read input from two sources at the same time - stdin, and the server.
+
+You might do this with a thread for the server and a thread for standard input, or you might
+
+use select()5
+
+to handle both tasks in a single thread without blocking. To implement hostname
+
+lookup (e.g. localhost to 127.0.0.1 or cslab6e to 128.148.31.38), use gethostbyname().
+
+5See http://www.lowtek.com/sockets/select.html for a guide on select()
+
+8
