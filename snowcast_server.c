@@ -16,7 +16,6 @@
  * =====================================================================================
  */
 
-//TODO Figure out what needs to be included (Risk of compile time error)
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -34,10 +33,7 @@
 
 
 #define BACKLOG 10
-#define MYPORT 8080
-#define UDPPORT "7070"
 
-//TODO temporary: works only for ipv4
 struct client_info{
 	//for talking to the TCP client
 	int ci_fd;
@@ -51,10 +47,11 @@ struct client_info{
 };
 
 struct station_info{
-	char *songName;
+	char *songname;
+	struct client_info *client_list;
 };
 
-
+int udp_sourcefd;
 /* 
  * ===  FUNCTION  ======================================================================
  *         Name:  stream
@@ -63,35 +60,34 @@ struct station_info{
  * =====================================================================================
  */
 	void
-stream (char* filename, struct client_info *client_list, const int udp_source_fd)
+stream (struct station_info *sinfo)
 {
 	ssize_t bytes_sent;
-	char line [512];
+	char line[512];
 	struct client_info *c;
+	socklen_t addr_len = sizeof(struct sockaddr);
 	while(1){
-		FILE *file = fopen(filename, "r");
+		FILE *file = fopen(sinfo->songname,"r");
+		printf("opened file %s\n",sinfo->songname);
+
 		memset(line,0,sizeof line);
-		//TODO this guy needs the server's passive UDP port file descriptor no. 
-		//TODO do I need to use mutexes for the above one?
+
 		while(fgets(line,sizeof line, file) != NULL){
-			//go through the linked list
-			//TODO lock with mutex
-			for(c=client_list;c!=NULL;c=c->ci_next){
-				bytes_sent = sendto(udp_source_fd, line, sizeof line, 0,
-					c->ci_udp_addr, sizeof(struct sockaddr));
+			for(c=sinfo->client_list;c!=NULL;c=c->ci_next){
+				bytes_sent =sendto(udp_sourcefd, line, sizeof line, 0,
+					c->ci_udp_addr, addr_len);
 				if(bytes_sent == -1){
 					perror("sendto()");
 					exit(1);
 				}
-				sleep(1);
-			} 
-			//TODO unlock mutex
+				printf("sent  %zd bytes\n", bytes_sent);
+			}
+			sleep(1);
 		}
 		fclose(file);
-	}	
-
-
+	}
 }		/* -----  end of function stream  ----- */
+
 
 /* 
  * ===  FUNCTION  ======================================================================
@@ -131,7 +127,7 @@ main ( int argc, char *argv[] )
 	hints.ai_flags = AI_PASSIVE; 
 
 	//getaddrinfo for passive socket (port 8080)	
-	if ( (status = getaddrinfo(NULL, "8080", &hints, &passiveaddr) != 0)){
+	if ( (status = getaddrinfo(NULL,argv[1], &hints, &passiveaddr) != 0)){
 		fprintf(stderr, "program: getaddrinfo() - %s\n", gai_strerror(status));
 	}
 
@@ -165,12 +161,7 @@ main ( int argc, char *argv[] )
 
 	//No need for this: Passive socket all set up. 
 	freeaddrinfo(passiveaddr);
-
 	printf("tcp socket setup successful!\n");
-
-	 
-
-
 
 	/*<-SET UP PASSIVE UDP SOCKET->*/
 	int udpfd;
@@ -180,7 +171,7 @@ main ( int argc, char *argv[] )
 	hints.ai_socktype = SOCK_DGRAM;
 	hints.ai_flags = AI_PASSIVE;
 
-	if ( (status = getaddrinfo(NULL, UDPPORT, &hints, &udpaddr)) != 0){
+	if ( (status = getaddrinfo(NULL, argv[1], &hints, &udpaddr)) != 0){
 		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(status));
 	}
 
@@ -208,18 +199,19 @@ main ( int argc, char *argv[] )
 
 	freeaddrinfo(udpaddr);
 	printf("udp socket setup successful!\n");
-
+	udp_sourcefd = udpfd;
 
 
 	/*<-SET UP STREAMING THREAD->*/
-	struct client_info *station_0_clients = NULL;
+	//struct client_info *station_0_clients = NULL;
+	struct station_info *station_0_info = malloc(sizeof(station_0_info));
+	station_0_info->songname = "test.text";
+	station_0_info->client_list = NULL; 
 	pthread_t thread_id;
-	//multiple arguments for pthreads
-	pthread_create(&thread_id, 0, (void *) &stream, station_0_clients);
+	pthread_create(&thread_id, 0, (void *)&stream, station_0_info);
 
 
-	/*<-INITIATE SERVICE->*/
-	
+	/*<-INITIATE SERVICE->*/ 
 	//for select()
 	struct timeval tv;
 	int tv_usec = 1;
@@ -237,24 +229,28 @@ main ( int argc, char *argv[] )
 	if(listen(sockfd, 10) == -1){
 		perror("program: error on listen");
 		exit(1);
-	}	//for talking to clients
+	}
+	
+	//for talking to clients
 	char request[512];
 	int request_bytes;
-	struct client_info *pending_client_head = NULL;
+	struct client_info *pending_clients = NULL;
+	struct client_info *i;
+
 	//for talking to the user
 	char command[512];
 	ssize_t command_bytes;
 
 	while(1){
 		/* <-CLEAN UP FOR ANOTHER SELECT-> */
-		printf("s\n");
+		printf("..\n");
 		readfds = masterfds;
 		tv.tv_usec = tv_usec;
 		tv.tv_sec = tv_sec;
 	
 
 		/*<-SELECT-> */
-	if(select(maxfd+1, &readfds, NULL, NULL, &tv) == -1){
+		if(select(maxfd+1, &readfds, NULL, NULL, &tv) == -1){
 			perror("program: error on select()");
 			close(sockfd);
 			//TODO for now, 1 client
@@ -265,7 +261,6 @@ main ( int argc, char *argv[] )
 		/*<-PASSIVE TCP-> */	
 		if (FD_ISSET(sockfd, &readfds)){
 			printf("new client!\n");
-			//accept() it
 			int clientfd = accept(sockfd, (struct sockaddr *)&their_addr, &ss_size);
 			if ( clientfd == -1 ) {
 				perror("program: error on accept()\n");
@@ -281,19 +276,19 @@ main ( int argc, char *argv[] )
 
 
 			//add client to the pending list
-			if(pending_client_head == NULL){
+			if(pending_clients == NULL){
 				printf("this is the first client\n");
-				struct client_info *newclient = (struct client_info *)malloc(sizeof(struct client_info));
+				struct client_info *newclient = malloc(sizeof(struct client_info));
 				newclient->ci_family = their_addr.ss_family;
 				newclient->ci_addr = addr_str;
 				newclient->ci_next = NULL;
 				newclient->ci_fd = clientfd;
-				pending_client_head = newclient;
+				pending_clients = newclient;
 			} else {
 				printf("we've had client(s) before\n");
 				//add this client at the end of the linkedlist
 				struct client_info *i;
-				for(i=pending_client_head;i!=NULL;i=i->ci_next){
+				for(i=pending_clients;i!=NULL;i=i->ci_next){
 					
 
 				}
@@ -301,14 +296,38 @@ main ( int argc, char *argv[] )
 			}
 			FD_SET(clientfd, &masterfds);
 			maxfd= clientfd;
-
 			//hi client!
 			send(clientfd, "welcome!", 8, 0);
 		}
 
+		/*<-ACTIVE TCP SOCKET CHECK for ACTIVE CLIENTS-> */
+		for(i=station_0_info->client_list;i!=NULL;i=i->ci_next){
+			//did you say something, i?
+			if(FD_ISSET(i->ci_fd, &readfds)){
+				printf("new message from active client %d\n", i->ci_fd);
+				if((request_bytes = recv(i->ci_fd, request, sizeof request, 0)) == -1){
+					perror("recv()");
+					continue;
+				}
+				if(!request_bytes){
+					printf("client quits\n");
+					//TODO get rid of the client from the active list
+					//TODO how to get the next highest fd number?
+					if(i->ci_fd == maxfd) maxfd = maxfd-1;
+					FD_CLR(i->ci_fd, &masterfds);
+					close(i->ci_fd);
+					continue; 
+				}
+
+				request[request_bytes] = '\0';
+				printf("client command: %s \n", request);
+
+			}
+
+		}
+
 		/*<-ACTIVE TCP SOCKET CHECK for PENDING CLIENTS-> */
-		struct client_info *i;
-		for(i=pending_client_head;i!= NULL;i=i->ci_next){
+		for(i=pending_clients;i!= NULL;i=i->ci_next){
 			if(FD_ISSET(i->ci_fd, &readfds)){
 				printf("new message from pending client %d\n", i->ci_fd);
 				if((request_bytes = recv(i->ci_fd, request, sizeof request, 0)) == -1){
@@ -335,60 +354,33 @@ main ( int argc, char *argv[] )
 					char *portaddr = request + 1;
 					//put in udp port to the struct
 					i->ci_udp = atoi(portaddr);
-					//with all the info you have in the struct, make a sockaddr
-					//to pass into sendto()
-					//TODO IPV6 SUPPORT
 					struct sockaddr_in *addr = malloc(sizeof(struct sockaddr_in));
-					//socklen_t addr_len = sizeof(struct sockaddr_in);
-					//maybe we can just use sizeof(struct sockaddr) for this?
 					addr->sin_family = i->ci_family;
 					addr->sin_port = htons(i->ci_udp);
 					addr->sin_addr = *((struct in_addr *) gethostbyname(i->ci_addr)->h_addr);
 					i->ci_udp_addr = (struct sockaddr *) addr;
 					
 					//add him to the active linkedlist to start streaming
-					if(station_0_clients == NULL){
+					if(station_0_info->client_list == NULL){
 						i->ci_next = NULL;
-						station_0_clients = i;
+						station_0_info->client_list = i;
+						if(i == NULL){
+							printf("i is null\n");
+						}
+						printf("Added first client to station 0!\n");
+						//TODO remove this client from the pending list
+						//temporary measure
+						pending_clients = i->ci_next;
 					} else {
-						//add this client at the end of the linked list
+						//TODO add this client at the end of the linked list
 					}
 				}else{
 					//whatever this command is, it cannot come before a hello
 					//this is where we send back an 'invalid command'
-
 				}
-				
-
 			}
 		}
 
-		/*<-ACTIVE TCP SOCKET CHECK for ACTIVE CLIENTS-> */
-		for(i=station_0_clients;i!=NULL;i=i->ci_next){
-			//did you say something, i?
-			//setstation maybe? a quit?
-			if(FD_ISSET(i->ci_fd, &readfds)){
-				printf("new message from active client %d\n", i->ci_fd);
-				if((request_bytes = recv(i->ci_fd, request, sizeof request, 0)) == -1){
-					perror("recv()");
-					continue;
-				}
-				if(!request_bytes){
-					printf("client quits\n");
-					//TODO get rid of the client from the active list
-					//TODO how to get the next highest fd number?
-					if(i->ci_fd == maxfd) maxfd = maxfd-1;
-					FD_CLR(i->ci_fd, &masterfds);
-					close(i->ci_fd);
-					continue; 
-				}
-
-				request[request_bytes] = '\0';
-				printf("client command: %s \n", request);
-
-			}
-
-		}
 
 		/*<-STDIN CHECK-> */	
 		if(FD_ISSET(0, &readfds)){
