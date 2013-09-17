@@ -26,25 +26,10 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
-
+#include "serial.h"
 
 #define MAXDATA 100
 
-
-/* 
- * ===  FUNCTION  ======================================================================
- *         Name:  get_in_addr
- *  Description:  
- * =====================================================================================
- */
-	void *
-get_in_addr (struct sockaddr *sa)
-{
-	if(sa->sa_family == AF_INET){
-		return & ((( struct sockaddr_in *)sa) -> sin_addr);
-	}
-	return & ((( struct sockaddr_in6 *)sa) -> sin6_addr);
-}		/* -----  end of function get_in_addr  ----- */
 
 /* 
  * ===  FUNCTION  ======================================================================
@@ -55,68 +40,36 @@ get_in_addr (struct sockaddr *sa)
 	int
 main ( int argc, char *argv[] )
 {
-	//for creating a passive socket 
-	struct addrinfo hints, *servinfo, *p;
-	int status, sockfd;
-
-	if(argc != 2){
-		fprintf(stderr, "usage: snowcast_listener udpport\n");
-		exit(1);
-	}
-
-
+	//<-SET UP UDP SOCKET->
+	struct addrinfo hints;
+	int sockfd;
 	memset(&hints, 0, sizeof hints);
 	hints.ai_family = AF_UNSPEC;
 	hints.ai_socktype = SOCK_DGRAM;
 	hints.ai_flags = AI_PASSIVE;
-	
-	if ( (status = getaddrinfo(NULL, argv[1], &hints, &servinfo)) != 0){
-		fprintf(stderr, "getaddrinfo : %s", gai_strerror(status));
-		exit(1);
-	}
-
-	for(p=servinfo;p!=NULL;p=p->ai_next){
-		if( (sockfd=socket(p->ai_family,p->ai_socktype,p->ai_protocol)) == -1){
-			perror("socket could not be created");
-			continue;
-		}
-
-		if( bind(sockfd, p->ai_addr, p->ai_addrlen) == -1){
-			close(sockfd);
-			perror("bind failed");
-			continue;
-		}
-		break;
-	}
-
-	if(p == NULL){
-		perror("port not available");
-		exit(1);
-	}
-
-	printf("socket setup successful!\n");
-
-	freeaddrinfo(servinfo);
+	sockfd = socket_setup(hints, argv[1], NULL); 
+	printf("socket on port %d setup successful!\n", atoi(argv[1]));
 
 	//for receiving packets
-	struct sockaddr_storage their_addr;
+	struct sockaddr_storage sender_addr;
 	ssize_t bytes_received;
-	socklen_t addr_len = sizeof their_addr;
+	socklen_t addr_len = sizeof sender_addr;
 	char data[MAXDATA];
+
 	char addrbuf[INET6_ADDRSTRLEN];
 	
 	while(1){
 		//let's listen
 		if((bytes_received = recvfrom(sockfd, data, MAXDATA-1, 0,
-			(struct sockaddr *)&their_addr, &addr_len)) == -1){
+			(struct sockaddr *)&sender_addr, &addr_len)) == -1){
 			perror("recvfrom");
 			exit(1);
 		}
 
 		//who sent this?
 		printf("%zd bytes packet sent from: %s\n",bytes_received,
-		inet_ntop(their_addr.ss_family,
-			get_in_addr((struct sockaddr *) &their_addr),
+		inet_ntop(sender_addr.ss_family,
+			get_in_addr((struct sockaddr *) &sender_addr),
 			addrbuf, sizeof addrbuf));
 
 		//what's the message?

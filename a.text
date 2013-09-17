@@ -1,0 +1,46 @@
+CS168 Programming Assignment 1: Snowcast
+Assignment Out: September 5th, 2013
+Milestone: September 12th, 2013, 6pm
+Assignment Due: September 19th, 2013, 4pm
+1 Introduction
+You will be implementing a simple Internet Radio Station. The purpose of this assignment is to
+become familiar with sockets and threads, and to get you used to thinking about network protocols.
+If you're unfamiliar with sockets or threads, you should read the pages about them linked from
+the course webpage. As always, e-mail us at cs168tas@cs.brown.edu or to come to one of our
+office hours if you have further questions
+2 Protoco
+This assgnment has two parts: the server, which streams songs, and a pair of clients for connecting
+to the server and receiving songs.
+There are two kinds of data being sent between the server and the client. One is the control
+data. The client uses this data to specify which station to listen to and the server uses it to give
+the client song information. The other kind is the song data, which the server reads from song les
+and streams to the client. You will be using TCP for the control data and UDP for the song data.
+2.1 Client to Server Commands
+The client sends the server commands. There are two commands the client can send the server,
+in the following format.
+Hello:
+uint8_t commandType = 0;
+uint16_t udpPort;
+SetStation:
+uint8_t commandType = 1;
+uint16_t stationNumber;
+A uint8_t1
+is an unsigned 8-bit integer. A uint16_t is an unsigned 16-bit integer. Your
+programs should use network byte order.
+2 So, to send a Hello command, your client must send
+exactly three bytes to the server.
+1You can use these types from C if you #include <inttypes.h>.
+2Use the functions htons, htonl, ntohs and ntohl to convert from network to host byte order and back.
+1CS168 Snowcast
+The Hello command is sent when the client connects to the server. It tells the server what
+UDP port the server should be streaming song data to.
+The SetStation command is sent to pick an inital station or to change stations. stationNumber
+identies the station.
+2.2 Server to Client Replies
+There are three possible replies the server may send to the client:
+Welcome:
+uint8_t replyType = 0;
+uint16_t numStations;
+Announce:
+uint8_t eplyType = 1;
+
